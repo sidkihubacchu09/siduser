@@ -19,7 +19,7 @@ os.makedirs(SCRIPTS_DIR, exist_ok=True)
 ACTIVE_PROCESSES = {}
 PENDING_HANDSHAKES = {}
 
-# --- ⚠️ REPLACE THESE WITH YOUR TELEGRAM CREDENTIALS ⚠️ ---
+# --- YOUR TELEGRAM CREDENTIALS ---
 API_ID = 38843772 
 API_HASH = "875fbb273801c8025d05e98173fca536"
 
@@ -43,6 +43,7 @@ def kill_process_tree(process_info):
 # --- Web Server Routes ---
 @app.route('/')
 def serve_homepage():
+    # This requires a folder named 'webapp' with 'index.html' inside it
     return app.send_static_file('index.html')
 
 # --- API Endpoints ---
@@ -56,28 +57,29 @@ def initiate_handshake():
         return jsonify({"status": "error", "message": "Missing credentials."}), 400
 
     safe_phone = "".join(c for c in phone if c.isalnum() or c in "+")
-    
-    # Determine if it's JS or PY
     ext = ".js" if "console.log" in script_code or "require(" in script_code else ".py"
     script_path = os.path.join(SCRIPTS_DIR, f"{safe_phone}_main{ext}")
+    session_path = os.path.join(SESSION_DIR, f"sess_{safe_phone}")
     
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(script_code)
 
-    try:
+    # THREAD-SAFE ASYNCIO EXECUTION
+    async def request_code():
         from telethon import TelegramClient
-        session_path = os.path.join(SESSION_DIR, f"sess_{safe_phone}")
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        client = TelegramClient(session_path, API_ID, API_HASH, loop=loop)
-        loop.run_until_complete(client.connect())
-        code_hash_ref = loop.run_until_complete(client.send_code_request(phone))
+        client = TelegramClient(session_path, API_ID, API_HASH)
+        await client.connect()
+        code_hash_ref = await client.send_code_request(phone)
+        await client.disconnect()
+        return code_hash_ref.phone_code_hash
+
+    try:
+        phone_code_hash = asyncio.run(request_code())
         
         PENDING_HANDSHAKES[safe_phone] = {
-            "client": client, "loop": loop, 
-            "phone_code_hash": code_hash_ref.phone_code_hash,
+            "phone_code_hash": phone_code_hash,
             "script_path": script_path,
+            "session_path": session_path,
             "ext": ext
         }
         return jsonify({"status": "awaiting_otp", "message": "OTP requested."})
@@ -92,19 +94,33 @@ def verify_otp_challenge():
     safe_phone = "".join(c for c in phone if c.isalnum() or c in "+")
     
     handshake = PENDING_HANDSHAKES.get(safe_phone)
-    if not handshake: return jsonify({"status": "error", "message": "Session expired."}), 400
+    if not handshake: 
+        return jsonify({"status": "error", "message": "Session expired."}), 400
+
+    # THREAD-SAFE ASYNCIO EXECUTION
+    async def verify_code():
+        from telethon import TelegramClient
+        from telethon.errors import SessionPasswordNeededError
+        client = TelegramClient(handshake["session_path"], API_ID, API_HASH)
+        await client.connect()
+        try:
+            await client.sign_in(phone=phone, code=otp_code, phone_code_hash=handshake["phone_code_hash"])
+            await client.disconnect()
+            return "deployed"
+        except SessionPasswordNeededError:
+            await client.disconnect()
+            return "awaiting_2fa"
 
     try:
-        asyncio.set_event_loop(handshake["loop"])
-        from telethon.errors import SessionPasswordNeededError
-        handshake["loop"].run_until_complete(handshake["client"].sign_in(
-            phone=phone, code=otp_code, phone_code_hash=handshake["phone_code_hash"]
-        ))
-        trigger_deployment(safe_phone, handshake["script_path"], handshake["ext"])
-        del PENDING_HANDSHAKES[safe_phone]
-        return jsonify({"status": "deployed"})
-    except SessionPasswordNeededError:
-        return jsonify({"status": "awaiting_2fa"})
+        result = asyncio.run(verify_code())
+        
+        if result == "deployed":
+            trigger_deployment(safe_phone, handshake["script_path"], handshake["ext"])
+            del PENDING_HANDSHAKES[safe_phone]
+            return jsonify({"status": "deployed"})
+        elif result == "awaiting_2fa":
+            return jsonify({"status": "awaiting_2fa"})
+            
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -116,11 +132,19 @@ def finalize_cloud_password():
     safe_phone = "".join(c for c in phone if c.isalnum() or c in "+")
     
     handshake = PENDING_HANDSHAKES.get(safe_phone)
-    if not handshake: return jsonify({"status": "error", "message": "Expired"}), 400
+    if not handshake: 
+        return jsonify({"status": "error", "message": "Expired"}), 400
+
+    # THREAD-SAFE ASYNCIO EXECUTION
+    async def verify_2fa():
+        from telethon import TelegramClient
+        client = TelegramClient(handshake["session_path"], API_ID, API_HASH)
+        await client.connect()
+        await client.sign_in(password=password)
+        await client.disconnect()
 
     try:
-        asyncio.set_event_loop(handshake["loop"])
-        handshake["loop"].run_until_complete(handshake["client"].sign_in(password=password))
+        asyncio.run(verify_2fa())
         trigger_deployment(safe_phone, handshake["script_path"], handshake["ext"])
         del PENDING_HANDSHAKES[safe_phone]
         return jsonify({"status": "deployed"})
