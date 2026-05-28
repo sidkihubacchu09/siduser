@@ -20,8 +20,8 @@ ACTIVE_PROCESSES = {}
 PENDING_HANDSHAKES = {}
 
 # --- ⚠️ REPLACE THESE WITH YOUR TELEGRAM CREDENTIALS ⚠️ ---
-API_ID = 1234567  
-API_HASH = "your_api_hash_here"
+API_ID = 38843772 
+API_HASH = "875fbb273801c8025d05e98173fca536"
 
 # --- Process Management Engine ---
 def kill_process_tree(process_info):
