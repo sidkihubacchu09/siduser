@@ -23,7 +23,7 @@ from werkzeug.utils import secure_filename
 from threading import Thread
 
 # --- Configuration ---
-TOKEN = '8032494974:AAE3s6Uh0c-KdWsXDd5ZP_R6h6KixSUt-dw' 
+TOKEN = '8637135798:AAEdTzCnL3fn1keuLzLxQN0BUULXlTMicVY' 
 OWNER_ID = 2119464081
 ADMIN_ID = 2119464081
 YOUR_USERNAME = '@Xricx0' 
