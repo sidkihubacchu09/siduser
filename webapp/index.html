@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SID HOSTING — Next-Gen Userbot Node</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <div class="video-bg-container">
+        <video id="bg-video" autoplay loop muted playsinline>
+            <source src="https://cdn.pixabay.com/video/2020/05/25/40131-424785461_large.mp4" type="video/mp4">
+        </video>
+        <div class="video-overlay"></div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <div class="app-container" id="main-app">
+
+        <div id="view-deploy" class="view-section active">
+            <div class="glass-panel" id="step1-script">
+                <div class="panel-header">
+                    <h2 class="gradient-text">Cloud Deployment Engine</h2>
+                    <span class="badge premium-badge">Node v4.1</span>
+                </div>
+                <p class="status-text">Enter your phone number connected to Telegram and write or upload your specialized userbot script.</p>
+                
+                <div class="input-group">
+                    <input type="tel" id="phoneInput" class="glass-input" placeholder="Telegram Phone (e.g., +1234567890)" autocomplete="off">
+                </div>
+                
+                <div class="code-editor-wrapper">
+                    <div class="editor-header">
+                        <div class="window-dots"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                        <span class="filename" id="filename-display">userbot_main.py</span>
+                    </div>
+                    <textarea id="scriptInput" spellcheck="false" placeholder="from telethon import TelegramClient..."></textarea>
+                </div>
+
+                <div class="btn-group">
+                    <input type="file" id="fileUpload" accept=".py,.js,.txt" style="display: none;" onchange="deployFlow.handleFileUpload(event)">
+                    <button class="secondary-btn btn-animate" onclick="document.getElementById('fileUpload').click()">📤 Upload Script</button>
+                    <button class="primary-btn btn-animate" id="btn-deploy" onclick="deployFlow.nextToOTP()">
+                        <span class="btn-text">Connect Cloud Node</span>
+                        <div class="spinner"></div>
+                    </button>
+                </div>
+            </div>
+
+            <div class="glass-panel hidden" id="step2-otp">
+                <div class="panel-header"><h2 class="gradient-text">Verify Node Handshake</h2></div>
+                <p class="status-text target-phone" id="otp-phone-display">A 5-digit verification code has been dispatched to your Telegram application.</p>
+                <div class="input-group text-center">
+                    <input type="number" id="otpInput" class="glass-input text-center letters-spaced" placeholder="• • • • •" autocomplete="off">
+                </div>
+                <button class="primary-btn btn-animate" id="btn-otp" onclick="deployFlow.nextToPassword()">
+                    <span class="btn-text">Verify Handshake Code</span>
+                    <div class="spinner"></div>
+                </button>
+                <button class="secondary-btn btn-animate mt-10" onclick="deployFlow.goBack('step2-otp', 'step1-script')">Abort & Go Back</button>
+            </div>
+
+            <div class="glass-panel hidden" id="step3-password">
+                <div class="panel-header"><h2 class="gradient-text">Two-Step Verification</h2></div>
+                <p class="status-text">Your Telegram account requires a Cloud Password (2FA) to safely sign and encrypt the session.</p>
+                <div class="input-group">
+                    <input type="password" id="passwordInput" class="glass-input text-center" placeholder="••••••••••••">
+                </div>
+                <button class="primary-btn btn-animate" id="btn-pass" onclick="deployFlow.finalize()">
+                    <span class="btn-text">Unlock Session & Deploy</span>
+                    <div class="spinner"></div>
+                </button>
+                <button class="secondary-btn btn-animate mt-10" onclick="deployFlow.goBack('step3-password', 'step2-otp')">Back to OTP</button>
+            </div>
+
+            <div class="glass-panel hidden text-center" id="step4-success">
+                <div class="success-ring"><span class="success-check">✓</span></div>
+                <h2 class="gradient-text">Deployment Successful</h2>
+                <p class="status-text mt-10">Your standalone userbot script is fully securely compiled, signed, and running inside an isolated cloud container sandbox.</p>
+                <button class="primary-btn btn-animate mt-20" onclick="nav.switchTab('view-files', document.querySelectorAll('.nav-item')[1])">Open Process Dashboard</button>
+                <button class="secondary-btn btn-animate mt-10" onclick="deployFlow.reset()">Deploy Secondary Instance</button>
+            </div>
+        </div>
+
+        <div id="view-files" class="view-section hidden">
+            <div class="glass-panel">
+                <div class="panel-header">
+                    <h2>Managed Grid Matrix</h2>
+                    <span class="badge active-badge" id="bot-count-badge">🟢 0 / 0 Threads Online</span>
+                </div>
+                <p class="status-text">Realtime management system for your active background userbot workflows.</p>
+                <div id="bots-list-container"></div>
+            </div>
+        </div>
+
+        <div id="view-settings" class="view-section hidden">
+            <div class="glass-panel">
+                <div class="panel-header"><h2>UI Aesthetics</h2></div>
+                <div class="input-group">
+                    <label class="field-label">Background Video Asset URL</label>
+                    <input type="text" id="video-url-input" class="glass-input" placeholder="https://domain.com/video.mp4" value="https://cdn.pixabay.com/video/2020/05/25/40131-424785461_large.mp4">
+                    <button class="secondary-btn btn-animate" onclick="window.updateBackgroundFromSettings()">Update Fluid Stream Asset</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-admin" class="view-section hidden">
+            <div class="glass-panel text-center" id="admin-login-panel">
+                <div class="panel-header justify-center"><h2 class="gradient-text">Admin Gatekeeper</h2></div>
+                <p class="status-text">Root access validation mandatory.</p>
+                <input type="password" id="adminPassInput" class="glass-input text-center" placeholder="Enter System Token Key">
+                <button class="primary-btn btn-animate" id="btn-admin-login" onclick="adminDashboard.verifyPassword()">
+                    <span class="btn-text">Authenticate Core Token</span>
+                    <div class="spinner"></div>
+                </button>
+            </div>
+
+            <div class="glass-panel hidden" id="admin-dash-panel">
+                <div class="panel-header">
+                    <h2 class="gradient-text">Master Server Matrix</h2>
+                    <span class="badge active-badge" id="global-server-badge">● Engine Online</span>
+                </div>
+                <p class="status-text" id="server-status-text"><span class="pulse status-dot green">●</span>Primary Node Cluster operational</p>
+                
+                <div class="admin-section-block">
+                    <p class="block-title mt-10 mb-10">Master Process Hypervisor Power State</p>
+                    <div style="display:flex; gap:10px;">
+                        <button class="action-btn success-btn" onclick="adminDashboard.toggleServerPower(true)">▶ Power ON Nodes</button>
+                        <button class="action-btn danger" onclick="adminDashboard.toggleServerPower(false)">⏹ Kill Threads</button>
+                    </div>
+                </div>
+                <button class="secondary-btn btn-animate mt-20" style="width:100%; border-color:rgba(255,95,86,0.3); color:#ff5f56;" onclick="adminDashboard.logout()">Wipe Access Tokens & Logout</button>
+            </div>
+        </div>
+
+        <div id="terminal-modal" class="modal-overlay hidden">
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <div class="terminal-title">
+                        <span class="dot red" onclick="terminal.close()"></span><span class="dot yellow"></span><span class="dot green"></span>
+                        <span id="terminal-bot-name">stdout_stream@cloud_node</span>
+                    </div>
+                    <span class="close-btn" onclick="terminal.close()">✖</span>
+                </div>
+                <div class="terminal-body" id="terminal-output"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <nav class="glass-nav">
+        <div class="nav-item active" onclick="nav.switchTab('view-deploy', this)"><span class="nav-icon">☁️</span><span class="nav-label">Deploy</span></div>
+        <div class="nav-item" onclick="nav.switchTab('view-files', this)"><span class="nav-icon">🤖</span><span class="nav-label">My Bots</span></div>
+        <div class="nav-item" onclick="nav.switchTab('view-settings', this)"><span class="nav-icon">⚙️</span><span class="nav-label">Settings</span></div>
+        <div class="nav-item" onclick="nav.switchTab('view-admin', this)"><span class="nav-icon">🛡️</span><span class="nav-label">Admin Core</span></div>
+    </nav>
+
+    <script src="js/script.js"></script>
+</body>
+</html>
