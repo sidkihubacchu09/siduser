@@ -3,6 +3,7 @@ import sys
 import subprocess
 import asyncio
 import psutil
+import time
 from flask import Flask, request, jsonify
 
 # Setup Flask to serve the frontend from the 'webapp' folder
@@ -23,27 +24,53 @@ PENDING_HANDSHAKES = {}
 API_ID = 38843772 
 API_HASH = "875fbb273801c8025d05e98173fca536"
 
-# --- Process Management Engine ---
+# --- Robust Process Management Engine (Hosting Logic) ---
 def kill_process_tree(process_info):
-    """Safely terminate a process and its children using psutil."""
+    """Safely terminate a process and its children, preventing memory leaks."""
+    pid = None
     try:
-        if 'log_file' in process_info and not process_info['log_file'].closed:
-            process_info['log_file'].close()
+        # Securely close file handlers to prevent I/O locks
+        if 'log_file' in process_info and hasattr(process_info['log_file'], 'close') and not process_info['log_file'].closed:
+            try:
+                process_info['log_file'].close()
+            except Exception as log_e:
+                print(f"Error closing log file: {log_e}")
 
         process = process_info.get('process')
         if process and hasattr(process, 'pid'):
-            parent = psutil.Process(process.pid)
-            children = parent.children(recursive=True)
-            for child in children:
-                child.kill()
-            parent.kill()
+            pid = process.pid
+            try:
+                parent = psutil.Process(pid)
+                children = parent.children(recursive=True)
+                
+                for child in children:
+                    try:
+                        child.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+                
+                # Wait for graceful exit, force kill if hanging
+                gone, alive = psutil.wait_procs(children, timeout=1)
+                for p in alive:
+                    try: p.kill()
+                    except Exception: pass
+                    
+                try:
+                    parent.terminate()
+                    parent.wait(timeout=1)
+                except psutil.TimeoutExpired:
+                    parent.kill()
+                except psutil.NoSuchProcess:
+                    pass
+
+            except psutil.NoSuchProcess:
+                pass
     except Exception as e:
-        print(f"Error killing process: {e}")
+        print(f"Unexpected error killing process tree for PID {pid}: {e}")
 
 # --- Web Server Routes ---
 @app.route('/')
 def serve_homepage():
-    # This requires a folder named 'webapp' with 'index.html' inside it
     return app.send_static_file('index.html')
 
 # --- API Endpoints ---
@@ -64,7 +91,6 @@ def initiate_handshake():
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(script_code)
 
-    # THREAD-SAFE ASYNCIO EXECUTION
     async def request_code():
         from telethon import TelegramClient
         client = TelegramClient(session_path, API_ID, API_HASH)
@@ -75,7 +101,6 @@ def initiate_handshake():
 
     try:
         phone_code_hash = asyncio.run(request_code())
-        
         PENDING_HANDSHAKES[safe_phone] = {
             "phone_code_hash": phone_code_hash,
             "script_path": script_path,
@@ -97,7 +122,6 @@ def verify_otp_challenge():
     if not handshake: 
         return jsonify({"status": "error", "message": "Session expired."}), 400
 
-    # THREAD-SAFE ASYNCIO EXECUTION
     async def verify_code():
         from telethon import TelegramClient
         from telethon.errors import SessionPasswordNeededError
@@ -113,7 +137,6 @@ def verify_otp_challenge():
 
     try:
         result = asyncio.run(verify_code())
-        
         if result == "deployed":
             trigger_deployment(safe_phone, handshake["script_path"], handshake["ext"])
             del PENDING_HANDSHAKES[safe_phone]
@@ -135,7 +158,6 @@ def finalize_cloud_password():
     if not handshake: 
         return jsonify({"status": "error", "message": "Expired"}), 400
 
-    # THREAD-SAFE ASYNCIO EXECUTION
     async def verify_2fa():
         from telethon import TelegramClient
         client = TelegramClient(handshake["session_path"], API_ID, API_HASH)
@@ -156,13 +178,56 @@ def trigger_deployment(phone_key, script_file_path, ext):
     log_file_handle = open(log_path, "w", encoding="utf-8")
     
     executable = "node" if ext == ".js" else sys.executable
-    proc = subprocess.Popen([executable, script_file_path], stdout=log_file_handle, stderr=subprocess.STDOUT)
+    
+    # Process Execution Flags (Hide background worker consoles in Windows)
+    startupinfo = None
+    creationflags = 0
+    if os.name == 'nt':
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+
+    proc = subprocess.Popen(
+        [executable, script_file_path], 
+        stdout=log_file_handle, 
+        stderr=subprocess.STDOUT,
+        startupinfo=startupinfo,
+        creationflags=creationflags
+    )
     
     ACTIVE_PROCESSES[phone_key] = {
         'process': proc,
         'log_file': log_file_handle,
-        'log_path': log_path
+        'log_path': log_path,
+        'start_time': time.time()
     }
+
+@app.route('/api/bot/status', methods=['GET'])
+def get_system_status():
+    """Live resource monitoring for active userbots"""
+    status_report = {}
+    for phone_key, info in list(ACTIVE_PROCESSES.items()):
+        proc = info.get('process')
+        if proc:
+            try:
+                p = psutil.Process(proc.pid)
+                # Check if alive and not a zombie process
+                if p.is_running() and p.status() != psutil.STATUS_ZOMBIE:
+                    mem_mb = p.memory_info().rss / (1024 * 1024)
+                    status_report[phone_key] = {
+                        "status": "Running",
+                        "ram": f"{mem_mb:.1f}MB"
+                    }
+                else:
+                    # Auto-cleanup zombie threads
+                    kill_process_tree(info)
+                    status_report[phone_key] = {"status": "Stopped", "ram": "0.0MB"}
+                    ACTIVE_PROCESSES.pop(phone_key, None)
+            except psutil.NoSuchProcess:
+                status_report[phone_key] = {"status": "Stopped", "ram": "0.0MB"}
+                ACTIVE_PROCESSES.pop(phone_key, None)
+    
+    return jsonify({"status": "success", "bots": status_report})
 
 @app.route('/api/bot/control', methods=['POST'])
 def control_threads():
@@ -186,7 +251,7 @@ def control_threads():
             
         if os.path.exists(log_path):
             with open(log_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()[-100:] # Get last 100 lines
+                lines = f.readlines()[-100:] 
                 return jsonify({"status": "success", "logs": "".join(lines)})
         return jsonify({"status": "success", "logs": "[System] No logs generated yet."})
 
