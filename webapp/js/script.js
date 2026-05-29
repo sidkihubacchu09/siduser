@@ -1,4 +1,4 @@
-// --- Global State Monitoring ---
+// --- State Monitoring ---
 const AppState = { phone: '', scriptContent: '', activeBots: {} };
 
 // --- Toast Notifications System ---
@@ -50,6 +50,46 @@ const uiEngine = {
         const adminInput = document.getElementById('admin-video-url-input');
         if(adminInput) adminInput.value = targetUrl;
         toast.show('Background updated successfully.', 'success');
+    }
+};
+
+// --- Live Resource Hosting Engine ---
+const hostingEngine = {
+    init() {
+        // Poll for real-time memory and process statuses every 3 seconds
+        setInterval(this.pollStatus.bind(this), 3000);
+    },
+    async pollStatus() {
+        if (Object.keys(AppState.activeBots).length === 0) return;
+        
+        try {
+            const response = await fetch('/api/bot/status');
+            const data = await response.json();
+            
+            let requiresUIUpdate = false;
+            
+            if (data.status === 'success') {
+                for (const [id, bot] of Object.entries(AppState.activeBots)) {
+                    const liveStats = data.bots[bot.phoneKey];
+                    if (liveStats) {
+                        // Update UI only if metrics have changed to prevent DOM thrashing
+                        if (bot.ram !== liveStats.ram || bot.status !== liveStats.status) {
+                            bot.ram = liveStats.ram;
+                            bot.status = liveStats.status;
+                            requiresUIUpdate = true;
+                        }
+                    } else if (bot.status === 'Running') {
+                        // Backend process was terminated externally or crashed
+                        bot.status = 'Stopped';
+                        bot.ram = '0.0MB';
+                        requiresUIUpdate = true;
+                    }
+                }
+            }
+            if (requiresUIUpdate) deployFlow.syncBotListUI();
+        } catch (e) {
+            // Silently suppress polling errors to avoid console spam during network drops
+        }
     }
 };
 
@@ -164,7 +204,8 @@ const deployFlow = {
         const fileName = document.getElementById('filename-display').innerText;
         const safeId = AppState.phone.replace(/[^0-9]/g, ''); 
         
-        AppState.activeBots[safeId] = { phoneKey: AppState.phone, name: fileName, status: 'Running', uptime: '0m', ram: '14.2MB' };
+        // Initializing with temporary string. HostingEngine poll will overwrite this rapidly.
+        AppState.activeBots[safeId] = { phoneKey: AppState.phone, name: fileName, status: 'Running', uptime: '0m', ram: 'Pending...' };
         this.syncBotListUI();
         toast.show('Userbot activated successfully!', 'success');
     },
@@ -334,4 +375,7 @@ const adminFlow = {
 };
 
 window.uiEngine = uiEngine;
-document.addEventListener('DOMContentLoaded', () => deployFlow.syncBotListUI());
+document.addEventListener('DOMContentLoaded', () => {
+    deployFlow.syncBotListUI();
+    hostingEngine.init(); 
+});
